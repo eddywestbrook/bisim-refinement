@@ -143,9 +143,36 @@ Definition mapDownSet {A B} `{LR A} `{LR B} (f:A -> B) dsA : DownSet B :=
 Definition lambdaDownSet {A B} `{LR A} `{LR B}
            (f: A -> DownSet B) : DownSet (A -> DownSet B) := downClose f.
 
+Lemma Proper_lambdaDownSet {A B} `{LR A} `{LR B} :
+  Proper (lr_leq ==> lr_leq) (lambdaDownSet (A:=A) (B:=B)).
+Proof.
+  intros f1 f2 Rf. apply Proper_downClose. assumption.
+Qed.
+
+Lemma Proper_lambdaDownSet_equiv {A B} `{LR A} `{LR B} :
+  Proper (lr_equiv ==> lr_equiv) (lambdaDownSet (A:=A) (B:=B)).
+Proof.
+  intros f1 f2 Rf. destruct Rf. split; apply Proper_downClose; assumption.
+Qed.
+
+
 Definition applyDownSet {A B} `{LR A} `{LR B}
            (dsF: DownSet (A -> DownSet B)) (a:A) : DownSet B :=
   bindDownSet dsF (fun f => f a).
+
+Lemma Proper_applyDownSet A B `{LR A} `{LR B} :
+  Proper (lr_leq ==> lr_leq) (applyDownSet (A:=A) (B:=B)).
+Proof.
+  intros ds1 ds2 Rds a. apply Proper_bindDownSet; [ assumption | ].
+  intro. reflexivity.
+Qed.
+
+Lemma Proper_applyDownSet_equiv A B `{LR A} `{LR B} :
+  Proper (lr_equiv ==> lr_equiv) (applyDownSet (A:=A) (B:=B)).
+Proof.
+  intros ds1 ds2 Rds. destruct Rds.
+  split; intro; apply Proper_applyDownSet; assumption.
+Qed.
 
 
 Lemma downSetBeta {A B} `{LR A} `{LR B} (f: A -> DownSet B) :
@@ -199,8 +226,14 @@ Lemma fixDownSetFunUnfold {A B} `{LR A} `{LR B}
       (f: (A -> DownSet B) -> (A -> DownSet B))
       (prp: Proper (lr_leq ==> lr_leq) f) :
   fixDownSetFun f =lr= f (fixDownSetFun f).
-
-FIXME HERE NOW: prove this!
+Proof.
+  unfold fixDownSetFun.
+  etransitivity.
+  - apply Proper_applyDownSet_equiv. apply fixDownSetUnfold.
+    intros ds1 ds2 Rds. apply Proper_lambdaDownSet. apply prp.
+    apply Proper_applyDownSet. assumption.
+  - rewrite downSetBeta. reflexivity.
+Qed.
 
 
 (***
