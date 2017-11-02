@@ -283,7 +283,7 @@ Instance LR_FinCompTree {St A} : LR (FinCompTree St A) :=
  *** Transition Monads
  ***)
 
-Class MonadTransOps M St : Type :=
+Class MonadTraceOps M St : Type :=
   {
     returnM : forall {A}, A -> M A;
     bindM : forall {A B}, M A -> (A -> M B) -> M B;
@@ -292,7 +292,7 @@ Class MonadTransOps M St : Type :=
     yieldM : M unit;
   }.
 
-Class MonadTrans M St `{MonadTransOps M St} : Type :=
+Class MonadTrace M St `{MonadTraceOps M St} : Type :=
   {
     Monad_LR {A} :> LR (M A);
 
@@ -331,7 +331,7 @@ Proof.
   admit. (* FIXME HERE *)
 Admitted.
 
-Instance MonadTransOps_FinTraceMonad St : MonadTransOps (FinTraceMonad St) St :=
+Instance MonadTraceOps_FinTraceMonad St : MonadTraceOps (FinTraceMonad St) St :=
   {|
     returnM A a := fun s => TreeLeaf s a;
     bindM A B m f := fun s => bindFinTree (m s) f;
@@ -340,7 +340,7 @@ Instance MonadTransOps_FinTraceMonad St : MonadTransOps (FinTraceMonad St) St :=
     yieldM := fun s => TreeNode s (fun s => TreeLeaf s tt)
   |}.
 
-Instance MonadTrans_FinTraceMonad St : MonadTrans (FinTraceMonad St) St.
+Instance MonadTrace_FinTraceMonad St : MonadTrace (FinTraceMonad St) St.
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
@@ -382,7 +382,7 @@ Fixpoint bindFinTreeTM {St A B} (fct: FinCompTree St A)
     TreeNodeF s (fun s' => bindFinTreeTM (step s') f)
   end.
 
-Instance MonadTransOps_TraceMonad St : MonadTransOps (TraceMonad St) St :=
+Instance MonadTraceOps_TraceMonad St : MonadTraceOps (TraceMonad St) St :=
   {|
     returnM A a s := downClose (returnM a s);
     bindM A B m f s :=
@@ -392,7 +392,7 @@ Instance MonadTransOps_TraceMonad St : MonadTransOps (TraceMonad St) St :=
     yieldM s := downClose (yieldM s);
   |}.
 
-Instance MonadTrans_TraceMonad St : MonadTrans (TraceMonad St) St.
+Instance MonadTrace_TraceMonad St : MonadTrace (TraceMonad St) St.
 Proof.
   admit.
 Admitted.
