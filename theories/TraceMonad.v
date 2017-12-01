@@ -11,6 +11,9 @@ Require Export Coq.Setoids.Setoid.
 Class LR A : Type :=
   { lr_leq : relation A; lr_PreOrder :> PreOrder lr_leq }.
 
+(* Typeclass resolution should not be filling in evars *)
+Hint Mode LR ! : typeclass_instances.
+
 Instance LR_Reflexive A `{LR A} : Reflexive lr_leq.
 Proof. typeclasses eauto. Qed.
 
@@ -74,13 +77,27 @@ Proof.
   constructor; intro; intros; apply I.
 Defined.
 
-Instance LR_pair {A B} `{LR A} `{LR B} : LR (A*B) :=
+Instance LR_product {A B} `{LR A} `{LR B} : LR (A*B) :=
   { lr_leq := fun p1 p2 => fst p1 <lr= fst p2 /\ snd p1 <lr= snd p2 }.
 Proof.
   constructor.
   - intro p. split; reflexivity.
   - intros p1 p2 p3 [ R12_l R12_r ] [ R23_l R23_r ].
     split; etransitivity; eassumption.
+Defined.
+
+(* The sort-of pointwise relation on sum types *)
+Inductive sumR {A B} `{LR A} `{LR B} : A+B -> A+B -> Prop :=
+| sumR_inl a1 a2 : a1 <lr= a2 -> sumR (inl a1) (inl a2)
+| sumR_inr b1 b2 : b1 <lr= b2 -> sumR (inr b1) (inr b2).
+
+Instance LR_sum {A B} `{LR A} `{LR B} : LR (A+B) :=
+  { lr_leq := sumR; }.
+Proof.
+  constructor.
+  - intro s. destruct s; constructor; reflexivity.
+  - intros s1 s2 s3 R12 R23; destruct R12; inversion R23;
+      constructor; etransitivity; eassumption.
 Defined.
 
 Instance LR_arrow {A B} `{LR B} : LR (A -> B) :=
@@ -104,19 +121,19 @@ Defined.
 resolution does not use it everywhere *)
 Definition LR_eq {A} : LR A := {| lr_leq := eq |}.
 
+(*
 Class ConstLR (F : Type -> Type) : Type :=
   { lr_leq_K : forall {A}, LR (F A) }.
 
 Instance LR_ConstLR F `{ConstLR F} A : LR (F A) := lr_leq_K.
 Typeclasses Transparent LR_ConstLR.
-
-(*
-Class LRFunctor (F : Type -> Type) : Type :=
-  { lr_leq_F : forall {A} `{LR A}, LR (F A) }.
-
-Instance LR_LRFunctor F `{LRFunctor F} A `{LR A} : LR (F A) := lr_leq_F.
-Typeclasses Transparent LR_LRFunctor.
 *)
+
+Class LRFunctor (F : forall A, LR A -> Type) : Type :=
+  { lr_leq_F : forall {A} `{LR A}, LR (F A _) }.
+
+Instance LR_LRFunctor F `{LRFunctor F} A `{LR A} : LR (F A _) := lr_leq_F.
+Typeclasses Transparent LR_LRFunctor.
 
 
 (***
@@ -191,6 +208,12 @@ Next Obligation.
   apply (downSetClosed _ _ _ H1). apply H2. apply H3.
 Defined.
 
+Instance Proper_fixDownSet {A B} `{LR A} `{LR B} :
+  Proper (lr_leq ==> lr_leq) (fixDownSet (A:=A) (B:=B)).
+Proof.
+  admit. (* FIXME HERE *)
+Admitted.
+
 (* We then prove this is a fixed-point using the Knaster-Tarski theorem *)
 Lemma fixDownSetUnfold {A B} `{LR A} `{LR B}
       (f: (A -> DownSet B) -> A -> DownSet B)
@@ -206,12 +229,6 @@ Proof.
   - split; [ | apply H1 ].
     simpl; intros; apply (H2 _ (prp _ _ H1)).
 Qed.
-
-Instance Proper_fixDownSet {A B} `{LR A} `{LR B} :
-  Proper (lr_leq ==> lr_leq) (fixDownSet (A:=A) (B:=B)).
-Proof.
-  admit. (* FIXME HERE *)
-Admitted.
 
 
 (* We can convert a function from A to sets of B to a set of functions from A to
@@ -229,8 +246,7 @@ Proof.
   intros f1 f2 R12 g in_g a. apply R12. apply in_g.
 Qed.
 
-Definition applyDownSet {A B} `{LR B}
-           (dsF: DownSet (A -> B)) (a:A) : DownSet B :=
+Definition applyDownSet {A B} `{LR B} (dsF: DownSet (A -> B)) (a:A) : DownSet B :=
   mapDownSet (fun f => f a) dsF.
 
 (* NOTE: applyDownSet is not Proper in its A argument unless we somehow build
@@ -257,76 +273,197 @@ Qed.
 
 
 (***
- *** Transition Monads
+ *** Monads With a Notion of Execution Traces
  ***)
 
-Class MonadTraceOps M St `{ConstLR M} : Type :=
+(* The operations for a monad with execution traces *)
+Class MonadTraceOps (M: forall A `{LR A}, Type) St `{LR St} : Type :=
   {
     (* Monadic return and bind *)
-    returnM : forall {A}, A -> M A;
-    bindM : forall {A B}, M A -> (A -> M B) -> M B;
+    returnM : forall {A} `{LR A}, A -> M A;
+    bindM : forall {A B} `{LR A} `{LR B}, M A -> (A -> M B) -> M B;
 
     (* State operations *)
     getM : M St;
     putM : St -> M unit;
 
-    (* Threading operations *)
+    (* One-step evolution to a final or intermediate state *)
+    stepsTo1 : forall {A} `{LR A}, St -> M A -> St -> A + M A -> Prop;
+  }.
+
+Class MonadTrace (M: forall A `{LR A}, Type) `{LRFunctor M}
+      St `{LR St} `{MonadTraceOps M St} : Prop :=
+  {
+    (* Proper-ness requirements *)
+    Proper_returnM {A} `{LR A} :
+      Proper (lr_leq ==> lr_leq) (returnM (M:=M) (A:=A));
+    Proper_bindM {A B} `{LR A} `{LR B} :
+      Proper (lr_leq ==> lr_leq ==> lr_leq) (bindM (M:=M) (A:=A) (B:=B));
+    Proper_putM : Proper (lr_leq ==> lr_leq) (putM (M:=M));
+    Proper_stepsTo1 {A} `{LR A} :
+      Proper (lr_equiv ==> lr_equiv ==> lr_equiv ==> lr_equiv ==> lr_equiv)
+             (stepsTo1 (M:=M) (A:=A));
+
+    (* FIXME: need to connect stepsTo1 more closely with the LR; e.g., if
+    stepsTo1 st1 m1 st2 res and m1 <lr= m2 then there should be some res2 such
+    that res1 <lr= res2 and stepsTo1 st1 m2 st2 res2, but maybe with extended
+    st1 and st2...? Is it like bisimulation, where extending either of (st1,m)
+    or (st2,res) yields an extended other one such that stepsTo1 still holds? *)
+
+    (* Standard monad laws, which require bind functions to be Proper *)
+    monad_return_bind {A B} `{LR A} `{LR B} a (f : A -> M B) :
+      Proper (lr_leq ==> lr_leq) f ->
+      bindM (returnM a) f =lr= f a;
+    monad_bind_return {A} `{LR A} (m : M A) :
+      bindM m returnM =lr= m;
+    monad_assoc {A B C} `{LR A} `{LR B} `{LR C}
+                m (f: A -> M B) (g: B -> M C) :
+      Proper (lr_leq ==> lr_leq) f ->
+      Proper (lr_leq ==> lr_leq) g ->
+      bindM (bindM m f) g =lr= bindM m (fun x => bindM (f x) g);
+
+    (* FIXME: write the state monad laws! *)
+
+    (* Laws for stepsTo1 *)
+    stepsTo1_returnM {A} `{LR A} (a:A) st :
+      stepsTo1 st (returnM a) st (inl a);
+    stepsTo1_bindM_1 {A B} `{LR A} `{LR B}
+                           st st' (m1 m2: M A) (f: A -> M B) :
+      Proper (lr_leq ==> lr_leq) f ->
+      stepsTo1 st m1 st' (inr m2) ->
+      stepsTo1 st (bindM m1 f) st' (inr (bindM m2 f));
+    stepsTo1_bindM_2 {A B} `{LR A} `{LR B}
+                           st st' st'' (m1: M A) a (f: A -> M B) res :
+      Proper (lr_leq ==> lr_leq) f ->
+      stepsTo1 st m1 st' (inl a) -> stepsTo1 st' (f a) st'' res ->
+      stepsTo1 st (bindM m1 f) st' res;
+    stepsTo1_getM st : stepsTo1 st getM st (inl st);
+    stepsTo1_putM st st' : stepsTo1 st (putM st') st' (inl tt);
+  }.
+
+
+(* Monads that support parallel execution of a process *)
+Class MonadParallelOps (M: forall A `{LR A}, Type) : Type :=
+  {
+    parallelM {A} `{LR A} : M A -> M unit -> M A;
     yieldM : M unit;
   }.
 
-Class MonadTrace M St `{MonadTraceOps M St} : Prop :=
+Class MonadParallel (M: forall A `{LR A}, Type) `{LRFunctor M} St `{LR St}
+      `{MonadTraceOps M St} `{MonadParallelOps M} : Prop :=
   {
-    Proper_bindM {A B} :
-      Proper (lr_leq ==> lr_leq ==> lr_leq) (bindM (A:=A) (B:=B));
+    (* MonadParallel is a subclass of MonadTrace *)
+    MonadTrace_MonadParallel :> MonadTrace M St;
 
-    monad_return_bind {A B} a (f : A -> M B) :
-      bindM (returnM a) f =lr= f a;
-    monad_bind_return {A} (m : M A) :
-      bindM m returnM =lr= m;
-    monad_assoc {A B C} m (f: A -> M B) (g: B -> M C) :
-      bindM (bindM m f) g =lr= bindM m (fun x => bindM (f x) g);
+    (* parallelM is Proper *)
+    Proper_parallelM : Proper (lr_leq ==> lr_leq ==> lr_leq) (parallelM (M:=M));
 
-    (* FIXME: write the state and threading monad laws! *)
+    (* parallelM commutes with bindM *)
+    bindM_parallelM {A B} `{LR A} `{LR B} m1 m2 f :
+      Proper (lr_leq ==> lr_leq) f ->
+      bindM (parallelM (M:=M) m1 m2) f =lr= parallelM (bindM m1 f) m2;
+
+    (* Laws for stepsTo1 *)
+    (* NOTE: there is no case for parallelM m1 m2 where m1 returns a value,
+    because this implies that m1 contains no yields, and so cannot be
+    interrupted anywhere. This is a little unintuitive, but makes sense if you
+    think about it a certain way... *)
+    stepsTo1_yieldM st :
+      stepsTo1 st (yieldM (M:=M)) st (inr (returnM tt));
+    stepsTo1_parallelM_1 st st' m1 m1' m2 :
+      stepsTo1 st m1 st' (inr m1') ->
+      stepsTo1 st (parallelM m1 m2) st' (inr (parallelM m1 m2));
+    stepsTo1_parallelM_2 st st' m1 m2 m2' :
+      stepsTo1 st m2 st' (inr m2') ->
+      stepsTo1 st (parallelM m1 m2) st' (inr (parallelM m1 m2'));
+    stepsTo1_parallelM_3 st st' m1 m2 :
+      stepsTo1 st m2 st' (inl tt) ->
+      stepsTo1 st (parallelM m1 m2) st' (inr m1);
   }.
 
-Class MonadForkJoinOps M : Type :=
-  {
-    forkJoinM : forall {A B}, M A -> M B -> M (A*B)%type;
-  }.
 
-Class MonadForkJoin M `{ConstLR M} `{MonadForkJoinOps M} : Prop :=
-  {
-    Proper_forkJoinM {A B} :
-      Proper (lr_leq ==> lr_leq ==> lr_leq) (forkJoinM (A:=A) (B:=B));
-    (* FIXME: write forkJoin laws...? *)
-  }.
-
-Class MonadForkOps M : Type :=
-  {
-    forkM : M unit -> M unit;
-  }.
-
-Class MonadFork M `{ConstLR M} `{MonadForkOps M} : Prop :=
-  {
-    Proper_forkM : Proper (lr_leq ==> lr_leq) (forkM (M:=M));
-    (* FIXME: write fork laws...? *)
-  }.
-
-Class MonadFixOps M : Type :=
+Class MonadFixOps (M: forall A `{LR A}, Type) : Type :=
   {
     fixM : forall {A B} `{LR A} `{LR B},
       ((A -> M B) -> (A -> M B)) -> A -> M B;
   }.
 
-Class MonadFix M `{ConstLR M} `{MonadFixOps M} : Prop :=
+Class MonadFix (M: forall A `{LR A}, Type) `{LRFunctor M}
+      `{MonadFixOps M} : Prop :=
   {
     Proper_fixM {A B} `{LR A} `{LR B} :>
-      Proper (lr_leq ==> lr_leq) (fixM (A:=A) (B:=B));
+      Proper (lr_leq ==> lr_leq) (fixM (M:=M) (A:=A) (B:=B));
     fixM_correct :
       forall {A B} `{LR A} `{LR B} (f: (A -> M B) -> (A -> M B)),
         Proper (lr_leq ==> lr_leq) f ->
         fixM f =lr= f (fixM f)
   }.
+
+
+(***
+ *** The Standard State Monad as a Trace Monad
+ ***)
+
+Definition StateM St A `{LR A} := St -> St * A.
+
+Instance LRFunctor_StateM St `{LR St} : LRFunctor (StateM St) :=
+  Build_LRFunctor _ _.
+
+Instance MonadTraceOps_StateM St `{LR St} : MonadTraceOps (StateM St) St :=
+  {|
+    returnM A lrA a st := (st, a);
+    bindM A B lrA lrB m f st :=
+      let (st', a) := m st in
+      f a st';
+    getM st := (st, st);
+    putM st' st := (st', tt);
+
+    stepsTo1 A lrA st1 m st2 res :=
+      st2 = fst (m st1) /\ res = inl (snd (m st1));
+  |}.
+
+Instance MonadTrace_StateM St `{LR St} : MonadTrace (StateM St) St.
+Proof.
+  admit. (* FIXME HERE *)
+Admitted.
+
+
+(***
+ *** The State Monad + Fixed-Points
+ ***)
+
+(* FIXME HERE: this needs an Option A in the output type, along with the
+appropriate LR; maybe call that type Bottom A instead of Option A? *)
+Definition FixStateM St `{LR St} A `{LR A} := DownSet (StateM St A).
+
+Instance LRFunctor_FixStateM St `{LR St} : LRFunctor (FixStateM St) :=
+  Build_LRFunctor _ _.
+
+Instance MonadTraceOps_FixStateM St `{LR St} : MonadTraceOps (FixStateM St) St :=
+  {|
+    returnM A lrA a := downClose (returnM a);
+    bindM A B lrA lrB m f :=
+      bindDownSet
+        m (fun m' =>
+             bindDownSet (lambdaDownSet f) (fun f' => downClose (bindM m' f')));
+    getM := downClose getM;
+    putM st' := downClose (putM (M:=StateM St) st');
+
+    stepsTo1 A lrA st1 m st2 res :=
+      match res with
+      | inl a =>
+        exists m', inDownSet m m' /\ stepsTo1 st1 m' st2 (inl a)
+      | inr res_m =>
+        exists m' res_m',
+        inDownSet m m' /\ inDownSet res_m res_m' /\
+        stepsTo1 st1 m' st2 (inr res_m')
+      end;
+  |}.
+
+Instance MonadTrace_FixStateM St `{LR St} : MonadTrace (FixStateM St) St.
+Proof.
+  admit. (* FIXME HERE *)
+Admitted.
 
 
 (***
@@ -336,31 +473,33 @@ Class MonadFix M `{ConstLR M} `{MonadFixOps M} : Prop :=
 Inductive FinCompTree St A : Type :=
 | CompStuck
 | CompDone (s:St) (a:A)
-| CompStep (s:St) (step: St -> FinCompTree St A)
-| CompChoice : FinCompTree St A -> FinCompTree St A -> FinCompTree St A
+| CompStep (s:St) (m: St -> FinCompTree St A)
+| CompPar (m: FinCompTree St A) (m2: FinCompTree St unit)
 .
 
 Arguments CompStuck {St A}.
 Arguments CompDone {St A} s a.
-Arguments CompStep {St A} s step.
-Arguments CompChoice {St A} tree1 tree2.
+Arguments CompStep {St A} s m.
+Arguments CompPar {St A} m m2.
 
-Fixpoint extendsFCT {St A} (tree1 tree2 : FinCompTree St A) : Prop :=
-  match (tree1, tree2) with
+Fixpoint extendsFCT {St A} `{LR St} `{LR A} (t1 t2 : FinCompTree St A) : Prop :=
+  match (t1, t2) with
   | (CompStuck, _) => True
-  | (CompDone s1 a1, CompDone s2 a2) => s1 = s2 /\ a1 = a2
-  | (CompStep s1 step1, CompStep s2 step2) =>
-    s1 = s2 /\ forall s, extendsFCT (step1 s) (step2 s)
-  | (CompChoice t1 t1', CompChoice t2 t2') =>
-    extendsFCT t1 t2 /\ extendsFCT t1' t2'
+  | (CompDone s1 a1, CompDone s2 a2) => s1 <lr= s2 /\ a1 <lr= a2
+  | (CompStep s1 m1, CompStep s2 m2) =>
+    s1 <lr= s2 /\ forall s, extendsFCT (m1 s) (m2 s)
+  | (CompPar m1 m1', CompPar m2 m2') =>
+    extendsFCT m1 m2 /\ extendsFCT m1' m2'
   | _ => False
   end.
 
-Instance PreOrder_extendsFCT {St A} : PreOrder (@extendsFCT St A).
+Instance PreOrder_extendsFCT {St A} `{LR St} `{LR A} :
+  PreOrder (extendsFCT (St:=St) (A:=A)).
 Proof.
   constructor.
-  - intros tree; induction tree; simpl; auto.
-  - intros tree1; induction tree1 as [ | | s a IH | ];
+  - intros tree; induction tree; simpl; auto; split; try reflexivity.
+    intros; apply H1.
+  - intros tree1; induction tree1;
       intros tree2 tree3;
       destruct tree2; destruct tree3; simpl; intros R12 R23;
         try auto; try contradiction.
@@ -369,12 +508,12 @@ Proof.
         reflexivity.
     + destruct R12 as [ Rs12 Ra12 ]; destruct R23 as [ Rs23 Ra23 ].
       split; [ rewrite Rs12; rewrite Rs23; reflexivity | ].
-      intro. apply (IH _ _ _ (Ra12 _) (Ra23 _)).
+      intro. apply (H1 _ _ _ _ (Ra12 _) (Ra23 _)).
     + destruct R12 as [ R12_1 R12_2 ]; destruct R23 as [ R23_1 R23_2 ].
       split; [ eapply IHtree1_1 | eapply IHtree1_2 ]; eassumption.
 Qed.
 
-Instance LR_FinCompTree {St A} : LR (FinCompTree St A) :=
+Instance LR_FinCompTree {St A} `{LR St} `{LR A} : LR (FinCompTree St A) :=
   { lr_leq := extendsFCT; lr_PreOrder := _ }.
 
 
@@ -383,90 +522,69 @@ Instance LR_FinCompTree {St A} : LR (FinCompTree St A) :=
  ***)
 
 (* The finite trace monad *)
-Definition FinTraceM St A := St -> FinCompTree St A.
+Definition FinTraceM St A `{LR A} := St -> FinCompTree St A.
 
 (* Typeclass resolution mostly finds this instance for us *)
-Instance ConstLR_FinTraceM St : ConstLR (FinTraceM St) :=
-  Build_ConstLR _ _.
+Instance LRFunctor_FinTraceM St `{LR St} : LRFunctor (FinTraceM St) :=
+  Build_LRFunctor _ _.
 
 (* Bind on a computation tree, applying f after the computation terminates *)
-Fixpoint bindFinTree {St A B} (fct: FinCompTree St A)
+Fixpoint bindFinTree {St A B} `{LR B} (fct: FinCompTree St A)
          (f : A -> FinTraceM St B) : FinCompTree St B :=
   match fct with
   | CompStuck => CompStuck
   | CompDone s a => f a s
   | CompStep s step =>
     CompStep s (fun s' => bindFinTree (step s') f)
-  | CompChoice fct1 fct2 =>
-    CompChoice (bindFinTree fct1 f) (bindFinTree fct2 f)
+  | CompPar fct1 fct2 => CompPar (bindFinTree fct1 f) fct2
   end.
 
-Instance Proper_bindFinTree St A B :
-  Proper (lr_leq ==> lr_leq ==> lr_leq) (@bindFinTree St A B).
+Instance Proper_bindFinTree St A B `{LR St} `{LR A} `{LR B} :
+  Proper (lr_leq ==> lr_leq ==> lr_leq) (bindFinTree (St:=St) (A:=A) (B:=B)).
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
 
-(* Build the computation that nondeterministically (via CompChoice) applies the
-function f on some CompStep in fct *)
-Fixpoint applyAtSomeStepFCT {St A B}
-         (f: (St -> FinCompTree St A) -> (St -> FinCompTree St B))
-         (fct: FinCompTree St A) : FinCompTree St B :=
+(* States that fct steps to output state st and remaining computation m *)
+Fixpoint stepFinTree {St A B} `{LR St} `{LR A} `{LR B}
+         (fct: FinCompTree St A) st m : Prop :=
   match fct with
-  | CompStuck => CompStuck
-  | CompDone s a => f (fun s' => CompDone s' a) s
-  | CompStep s step =>
-    CompChoice
-      (CompStep s (f step))
-      (CompStep s (fun s' => applyAtSomeStepFCT f (step s')))
-  | CompChoice fct1 fct2 =>
-    CompChoice (applyAtSomeStepFCT f fct1) (applyAtSomeStepFCT f fct2)
+  | CompStuck => False
+  | CompDone _ _ => False
+  | CompStep st' m' => st =lr= st' /\ m' =lr= m
+  | CompPar fct1 fct2 =>
+    (exists m', stepFinTree fct1 st m' /\ m = fun st' => CompPar (m' st') fct2)
+    \/
+    (exists m', stepFinTree fct2 st m' /\ m = fun st' => CompPar fct1 (m' st'))
   end.
 
-Fixpoint forkJoinFCT {St A B} (fct: FinCompTree St A)
-         (mb: St -> FinCompTree St B) : FinCompTree St (A*B) :=
-  match fct with
-  | CompStuck => CompStuck
-  | CompDone s a =>
-    bindFinTree (mb s) (fun b s' => CompDone s' (a,b))
-  | CompStep s step =>
-    CompChoice
-      (CompStep s (fun s' => forkJoinFCT (step s') mb))
-      (CompStep
-         s
-         (fun s' =>
-            applyAtSomeStepFCT
-              (fun mb' s' => forkJoinFCT (step s') mb')
-              (mb s)))
-  | CompChoice fct1 fct2 =>
-    CompChoice (forkJoinFCT fct1 mb) (forkJoinFCT fct2 mb)
-  end.
 
-Instance MonadTraceOps_FinTraceM St : MonadTraceOps (FinTraceM St) St :=
+Instance MonadTraceOps_FinTraceM St `{LR St} : MonadTraceOps (FinTraceM St) St :=
   {|
-    returnM A a := fun s => CompDone s a;
-    bindM A B m f := fun s => bindFinTree (m s) f;
-    getM := fun s => CompDone s s;
-    putM s := fun _ => CompDone s tt;
+    returnM A lrA a := fun s => CompDone s a;
+    bindM A B lrA lrB m f s := bindFinTree (m s) f;
+    getM st := CompDone st st;
+    putM st' st := CompDone st' tt;
+    stepsTo1 A lrA st1 m1 st2 res :=
+      match res with
+      | inl a => m1 st1 =lr= CompDone st2 a
+      | inr m2 => stepFinTree (m1 st1) st2 m2
+      end
+  |}.
+
+Instance MonadTrace_FinTraceM St `{LR St} : MonadTrace (FinTraceM St) St.
+Proof.
+  admit. (* FIXME HERE *)
+Admitted.
+
+Instance MonadParallelOps_FinTraceM St `{LR St}
+  : MonadParallelOps (FinTraceM St) :=
+  {|
+    parallelM A lrA m1 m2 st := CompPar (m1 st : FinCompTree St A) (m2 st);
     yieldM := fun s => CompStep s (fun s => CompDone s tt);
   |}.
 
-Instance MonadTrace_FinTraceM St : MonadTrace (FinTraceM St) St.
-Proof.
-  admit. (* FIXME HERE *)
-Admitted.
-
-Instance MonadForkJoinOps_FinTraceM St : MonadForkJoinOps (FinTraceM St) :=
-  {|
-    forkJoinM :=
-      fun A B m1 m2 s =>
-        CompChoice
-          (forkJoinFCT (m1 s) m2)
-          (bindFinTree (forkJoinFCT (m2 s) m1)
-                       (fun (ba:B*A) s' => CompDone s' (snd ba, fst ba)))
-  |}.
-
-Instance MonadForkJoin_FinTraceM St : MonadForkJoin (FinTraceM St).
+Instance MonadParallel_FinTraceM St `{LR St} : MonadParallel (FinTraceM St) St.
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
@@ -476,109 +594,60 @@ Admitted.
  *** The Trace Monad
  ***)
 
-Definition TraceM St A := DownSet (FinTraceM St A).
+Definition TraceM St `{LR St} A `{LR A} := DownSet (FinTraceM St A).
 
-Instance ConstLR_TraceM St : ConstLR (TraceM St) := Build_ConstLR _ _.
+Instance LRFunctor_TraceM St `{LR St} : LRFunctor (TraceM St) :=
+  Build_LRFunctor _ _.
 
-Instance MonadTraceOps_TraceM St : MonadTraceOps (TraceM St) St :=
+Instance MonadTraceOps_TraceM St `{LR St} : MonadTraceOps (TraceM St) St :=
   {|
-    returnM A a := downClose (returnM a);
-    bindM A B m f :=
+    returnM A lrA a := downClose (returnM a);
+    bindM A B lrA lrB m f :=
       bindDownSet m (fun fin_m =>
                        mapDownSet (bindM fin_m) (lambdaDownSet f));
     getM := downClose getM;
-    putM s := downClose (putM s);
-    yieldM := downClose yieldM
+    putM s := downClose (putM (M:=FinTraceM St) s);
+    stepsTo1 A lrA st1 m1 st2 res :=
+      match res with
+      | inl a =>
+        exists fin_m, inDownSet m1 fin_m /\ stepsTo1 st1 fin_m st2 (inl a)
+      | inr m2 =>
+        (* m2 must be non-empty *)
+        (exists fin_m2, inDownSet m2 fin_m2) /\
+        (* Every element of m2 must have an element of m1 that steps to it *)
+        forall fin_m2,
+          inDownSet m2 fin_m2 ->
+          exists fin_m1, inDownSet m1 fin_m1 /\ stepsTo1 st1 fin_m1 st2 (inr fin_m2)
+      end
   |}.
 
-Instance MonadTrace_TraceM St : MonadTrace (TraceM St) St.
+Instance MonadTrace_TraceM St `{LR St} : MonadTrace (TraceM St) St.
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
 
-Instance MonadForkJoinOps_TraceM St : MonadForkJoinOps (TraceM St) :=
+Instance MonadFixOps_TraceM St `{LR St} : MonadFixOps (TraceM St) :=
   {|
-    forkJoinM A B m1 m2 :=
-      bindDownSet m1 (fun (fin_m1: FinTraceM St A) =>
-                        mapDownSet (forkJoinM fin_m1) m2)
+    fixM A B lrA lrB := fixDownSet
   |}.
 
-Instance MonadForkJoin_TraceM St : MonadForkJoin (TraceM St).
+Instance MonadFix_TraceM St `{LR St} : MonadFix (TraceM St).
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
 
-Instance MonadFixOps_TraceM St : MonadFixOps (TraceM St) :=
+Instance MonadParallelOps_TraceM St `{LR St} : MonadParallelOps (TraceM St) :=
   {|
-    fixM A B lrA lrB f := fixDownSet f
+    parallelM A lrA m1 m2 :=
+      bindDownSet
+        (m1 : TraceM St A)
+        (fun fin_m1 =>
+           bindDownSet m2 (fun fin_m2 =>
+                             downClose (parallelM fin_m1 fin_m2)));
+    yieldM := downClose yieldM;
   |}.
 
-Instance MonadFix_TraceM St : MonadFix (TraceM St).
+Instance MonadParallel_TraceM St `{LR St} : MonadParallel (TraceM St) St.
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
-
-
-(***
- *** The Continuation-Trace Monad
- ***)
-
-Definition ContTraceM St A := (A -> TraceM St unit) -> TraceM St unit.
-
-Instance ConstLR_ContTraceM St : ConstLR (ContTraceM St) := Build_ConstLR _ _.
-
-Instance MonadTraceOps_ContTraceM St : MonadTraceOps (ContTraceM St) St :=
-  {|
-    returnM A a := fun k => k a;
-    bindM A B m f := fun k => m (fun x => f x k);
-    getM := fun k => bindM getM k;
-    putM s := fun k => bindM (putM s) k;
-    yieldM := fun k => bindM yieldM k;
-  |}.
-
-Instance MonadTrace_ContTraceM St : MonadTrace (ContTraceM St) St.
-Proof.
-  admit.
-Admitted.
-
-Instance MonadFixOps_ContTraceM St : MonadFixOps (ContTraceM St) :=
-  {|
-    fixM A B lrA lrB f a k :=
-      fixDownSet (fun g ak => f (fun a' k' => g (a', k')) (fst ak) (snd ak)) (a,k)
-  |}.
-
-Instance MonadFix_ContTraceM St : MonadFix (ContTraceM St).
-Proof.
-  admit.
-Admitted.
-
-Instance MonadForkOps_ContTraceM St : MonadForkOps (ContTraceM St) :=
-  {|
-    forkM :=
-      fun (m: ContTraceM St unit) =>
-        (fun k =>
-           bindM (forkJoinM (m returnM) (k tt)) (fun _ => returnM tt))
-        : ContTraceM St unit
-  |}.
-
-Instance MonadFork_ContTraceM St : MonadFork (ContTraceM St).
-Proof.
-  admit.
-Admitted.
-
-
-(***
- *** Computation Traces in the Trace Monad
- ***)
-
-Definition stepsTo1 {St A} `{LR A} : relation (St * TraceMonad St A) :=
-  fun stm1 stm2 =>
-    CompStepF (fst stm2) (snd stm2) <lr= (snd stm1) (fst stm1).
-
-Definition stepsTo {St A} `{LR A} := clos_trans _ (stepsTo1 (St:=St) (A:=A)).
-
-Definition evalsTo1 {St A} `{LR A} (stm : St * TraceMonad St A) (res : St * A) :=
-  inDownSet ((snd stm) (fst stm)) (CompDone (fst res) (snd res)).
-
-Definition evalsTo {St A} `{LR A} (stm : St * TraceMonad St A) (res : St * A) :=
-  exists2 stm', stepsTo stm stm' & evalsTo1 stm' res.
