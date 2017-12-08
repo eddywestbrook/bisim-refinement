@@ -288,6 +288,8 @@ Record Lens (A B: Type) `{LR A} `{LR B} : Type :=
   {
     getL : A -> B;
     putL : B -> A -> A;
+    proper_getL : Proper (lr_equiv ==> lr_equiv) getL;
+    proper_putL : Proper (lr_equiv ==> lr_equiv ==> lr_equiv) putL;
     lens_get_put : forall a, putL (getL a) a =lr= a;
     lens_put_get : forall a b, getL (putL b a) =lr= b;
     lens_put_put : forall a b1 b2, putL b2 (putL b1 a) =lr= putL b2 a;
@@ -298,6 +300,14 @@ Arguments putL {A B _ _} _ _ _.
 Arguments lens_get_put {A B _ _}.
 Arguments lens_put_get {A B _ _}.
 Arguments lens_put_put {A B _ _}.
+
+Instance Proper_getL St1 St2 `{LR St1} `{LR St2} (l: Lens St1 St2) :
+  Proper (lr_equiv ==> lr_equiv) (getL l) :=
+  proper_getL _ _ _.
+
+Instance Proper_putL St1 St2 `{LR St1} `{LR St2} (l: Lens St1 St2) :
+  Proper (lr_equiv ==> lr_equiv ==> lr_equiv) (putL l) :=
+  proper_putL _ _ _.
 
 (* FIXME HERE: define some standard lenses, e.g., identity, projections, etc.,
 as well as composition of lenses *)
