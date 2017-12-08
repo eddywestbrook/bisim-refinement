@@ -335,6 +335,27 @@ Class MonadTraceOps (M: forall St `{LR St} A `{LR A}, Type) : Type :=
         St -> M St A -> St -> A + M St A -> Prop;
   }.
 
+(* Evolution = stepping to an intermediate state *)
+Definition evolvesTo1 `{MonadTraceOps} {St} `{LR St} {A} `{LR A}
+           st1 (m1: M St _ A _) st2 m2 : Prop :=
+  stepsTo1 st1 m1 st2 (inr m2).
+
+(* Multi-step evolution *)
+Definition evolvesTo `{MonadTraceOps} {St} `{LR St} {A} `{LR A}
+           st1 (m1: M St _ A _) st2 m2 : Prop :=
+  clos_refl_trans _ (fun st_m_1 st_m_2 =>
+                       evolvesTo1 (fst st_m_1) (snd st_m_1)
+                                  (fst st_m_2) (snd st_m_2))
+                  (st1, m1) (st2, m2).
+
+Definition stepsTo `{MonadTraceOps} {St} `{LR St} {A} `{LR A}
+           st1 (m1: M St _ A _) st2 res : Prop :=
+  match res with
+  | inl a =>
+    exists st2' m2, evolvesTo st1 m1 st2' m2 /\ stepsTo1 st2' m2 st2 (inl a)
+  | inr m2 => evolvesTo st1 m1 st2 m2
+  end.
+
 Class MonadTrace (M: forall St `{LR St} A `{LR A}, Type)
       `{LRFunctor2 M} `{MonadTraceOps M} : Prop :=
   {
