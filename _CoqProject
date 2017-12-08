@@ -1,3 +1,4 @@
 -Q theories BisimRefinement
 
 ./theories/TraceMonad.v
+./theories/BisimPerm.v

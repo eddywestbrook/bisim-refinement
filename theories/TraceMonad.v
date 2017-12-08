@@ -72,6 +72,10 @@ Proof.
 Qed.
 
 
+(***
+ *** Logical Relations for Common Types
+ ***)
+
 Instance LR_unit : LR unit := { lr_leq := fun _ _ => True }.
 Proof.
   constructor; intro; intros; apply I.
@@ -117,6 +121,7 @@ Proof.
 Defined.
 
 
+(* The logical relation for provable equality *)
 (* NOTE: we make this a Definition and *NOT* an Instance so that typeclass
 resolution does not use it everywhere *)
 Definition LR_eq {A} : LR A := {| lr_leq := eq |}.
@@ -141,6 +146,66 @@ Class LRFunctor2 (F : forall A, LR A -> forall B, LR B -> Type) : Type :=
 Instance LR_LRFunctor2 F `{LRFunctor2 F} A `{LR A} B `{LR B} : LR (F A _ B _) :=
   lr_leq_F2.
 Typeclasses Transparent LR_LRFunctor2.
+
+
+(***
+ *** Some Useful Properness Instances for Rewriting
+ ***)
+
+Instance Proper_lr_equiv_lr_equiv A `{LR A} :
+  Proper (lr_equiv ==> lr_equiv ==> lr_equiv) (@lr_equiv A _).
+Proof.
+  intros x1 x2 Rx y1 y2 Ry. split; intro.
+  - rewrite <- Rx. rewrite <- Ry. assumption.
+  - rewrite Rx. rewrite Ry. assumption.
+Qed.
+
+Instance Proper_pair A `{LR A} B `{LR B} :
+  Proper (lr_leq ==> lr_leq ==> lr_leq) (@pair A B).
+Proof.
+  intros a1 a2 Ra b1 b2 Rb. split; assumption.
+Qed.
+
+Instance Proper_pair_equiv A `{LR A} B `{LR B} :
+  Proper (lr_equiv ==> lr_equiv ==> lr_equiv) (@pair A B).
+Proof.
+  intros a1 a2 Ra b1 b2 Rb. destruct Ra; destruct Rb; split; split; assumption.
+Qed.
+Instance Proper_fst A `{LR A} B `{LR B} :
+  Proper (lr_leq ==> lr_leq) (@fst A B).
+Proof.
+  intros p1 p2 Rp. destruct Rp. assumption.
+Qed.
+
+Instance Proper_snd A `{LR A} B `{LR B} :
+  Proper (lr_leq ==> lr_leq) (@snd A B).
+Proof.
+  intros p1 p2 Rp. destruct Rp. assumption.
+Qed.
+
+Instance Proper_fst_equiv A `{LR A} B `{LR B} :
+  Proper (lr_equiv ==> lr_equiv) (@fst A B).
+Proof.
+  intros p1 p2 eqp. destruct eqp as [ [ Rp1 Rp2 ] [ Rp1' Rp2' ] ].
+  split; assumption.
+Qed.
+
+Instance Proper_snd_equiv A `{LR A} B `{LR B} :
+  Proper (lr_equiv ==> lr_equiv) (@snd A B).
+Proof.
+  intros p1 p2 eqp. destruct eqp as [ [ Rp1 Rp2 ] [ Rp1' Rp2' ] ].
+  split; assumption.
+Qed.
+
+Instance Proper_and_equiv : Proper (lr_equiv ==> lr_equiv ==> lr_equiv) and.
+Proof.
+  change (Proper (iff ==> iff ==> iff) and). typeclasses eauto.
+Qed.
+
+Instance Proper_or_equiv : Proper (lr_equiv ==> lr_equiv ==> lr_equiv) or.
+Proof.
+  change (Proper (iff ==> iff ==> iff) or). typeclasses eauto.
+Qed.
 
 
 (***
