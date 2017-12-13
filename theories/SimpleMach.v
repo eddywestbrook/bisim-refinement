@@ -30,6 +30,27 @@ Definition val_true (v: SMValue) : bool :=
     mkSMValue n => negb (Nat.eqb n 0)
   end.
 
+(* The lens for viewing a value as a nat *)
+Program Definition SMValue_nat_lens : Lens SMValue nat :=
+  {| getL v := match v with mkSMValue n => n end;
+     putL n v := mkSMValue n; |}.
+Next Obligation.
+  intros [ n1 ] [ n2 ] eq_v. destruct eq_v. inversion H. reflexivity.
+Defined.
+Next Obligation.
+  intros n1 n2 [ eq_n eq_n' ] v1 v2 eq_v. rewrite eq_n. reflexivity.
+Defined.
+Next Obligation.
+  destruct a. reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+
+
 (* A tuple of 0 or more values *)
 Definition SMValues n := NTuple SMValue n.
 
@@ -222,6 +243,7 @@ to function bodies with 1 return value *)
 Inductive InstMem : Type := mkInstMem (imap:nat -> option (SMBlock 1)).
 
 (* Instruction memories are related by the built-in Coq intensional equality *)
+(* FIXME HERE: this should be an extensional equality *)
 Instance LR_InstMem : LR InstMem := LR_eq.
 
 (* Read a function pointer to get a function body, defaulting to "return undef"
@@ -239,7 +261,7 @@ Definition readFunPtr (mem:InstMem) (fptr:SMValue) : option (SMBlock 1) :=
 (* A machine state = registers and two types of memory *)
 Definition SMState : Type := (SMRegs * (DataMem * InstMem)).
 
-Instance LR_SMState : LR SMState := Build_LR _ _ _.
+Instance LR_SMState : LR SMState := LR_product.
 
 (* Lenses for the top-level components of SMState *)
 Definition regs_lens : Lens SMState SMRegs := fst_lens _ _.
@@ -359,5 +381,35 @@ Definition evalInstr {n} (inst: SMInstr n) : SMMonad (SMValues n) :=
 (* Tie the knot for evalBlock *)
 Definition evalBlock {n} (block: SMBlock n) : SMMonad (SMValues n) :=
   evalBlock' evalFunBody block.
+
+
+(***
+ *** Simple Machine Permissions
+ ***)
+
+(* A state permission is a permission to read the state as some type A *)
+Definition StPerm A `{LR A} : Type := BPerm SMState A.
+
+(* A value permission is a permission to read a value-in-state as some type A *)
+Definition ValPerm A `{LR A} : Type := BPerm (SMValue * SMState) A.
+
+(* A permission for 0 or more values *)
+Definition ValsPerm n A `{LR A} : Type := BPerm (SMValues n * SMState) A.
+
+(* A permission to view a value as a natural number *)
+Definition nat_perm : ValPerm nat :=
+  lens_bperm (compose_lens (fst_lens _ _) SMValue_nat_lens).
+
+
+(* A permission to view a value as a pointer to a (non-cyclic) linked list *)
+(* FIXME HERE: define this! *)
+Definition linked_list_perm A `{LR A} (bperm: ValPerm A) : ValPerm (list A).
+  admit.
+Admitted.
+
+
+(***
+ *** Bisimulation Abstraction
+ ***)
 
 
