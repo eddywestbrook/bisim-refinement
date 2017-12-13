@@ -90,6 +90,48 @@ Proof.
     split; etransitivity; eassumption.
 Defined.
 
+(* The "just add bottom" type, which is like option but with a built-in order *)
+(*
+Inductive Bottom A :=
+| bottom
+| not_bottom (a:A)
+.
+
+Arguments bottom {A}.
+Arguments not_bottom {A} a.
+
+(* The logical relation for Bottom *)
+Inductive BottomR {A} `{LR A} : Bottom A -> Bottom A -> Prop :=
+| BottomR_bottom b2 : BottomR bottom b2
+| BottomR_not_bottom a1 a2 :
+    a1 <lr= a2 -> BottomR (not_bottom a1) (not_bottom a2)
+.
+
+Instance LR_Bottom A `{LR A} : LR (Bottom A) :=
+  { lr_leq := BottomR; }.
+Proof.
+  constructor.
+  - intro b1; destruct b1; constructor; reflexivity.
+  - intros b1 b2 b3 R12; destruct R12; intro R23; inversion R23; try constructor.
+    etransitivity; eassumption.
+Defined.
+*)
+
+(* The logical relation for option A, where None <lr= anything *)
+Inductive optionR {A} `{LR A} : option A -> option A -> Prop :=
+| optionR_None b2 : optionR None b2
+| optionR_Some a1 a2 : a1 <lr= a2 -> optionR (Some a1) (Some a2)
+.
+
+Instance LR_option A `{LR A} : LR (option A) :=
+  { lr_leq := optionR; }.
+Proof.
+  constructor.
+  - intro b1; destruct b1; constructor; reflexivity.
+  - intros b1 b2 b3 R12; destruct R12; intro R23; inversion R23; try constructor.
+    etransitivity; eassumption.
+Defined.
+
 (* The sort-of pointwise relation on sum types *)
 Inductive sumR {A B} `{LR A} `{LR B} : A+B -> A+B -> Prop :=
 | sumR_inl a1 a2 : a1 <lr= a2 -> sumR (inl a1) (inl a2)
@@ -125,6 +167,33 @@ Defined.
 (* NOTE: we make this a Definition and *NOT* an Instance so that typeclass
 resolution does not use it everywhere *)
 Definition LR_eq {A} : LR A := {| lr_leq := eq |}.
+
+(* A tuple of 0 or more objects *)
+Fixpoint NTuple (A:Type) n : Type :=
+  match n with
+  | 0 => unit
+  | S n' => A * (NTuple A n')
+  end.
+
+(* The relation for n-tuples is pointwise *)
+Fixpoint NTuple_rel A `{LR A} n : relation (NTuple A n) :=
+  match n with
+  | 0 => fun _ _ => True
+  | S n' =>
+    fun xs1 xs2 =>
+      fst xs1 <lr= fst xs2 /\ NTuple_rel A n' (snd xs1) (snd xs2)
+  end.
+
+Instance LR_NTuple A `{LR A} n : LR (NTuple A n) :=
+  {| lr_leq := NTuple_rel A n; |}.
+Proof.
+  induction n; constructor.
+  - intro; apply I.
+  - intros xs1 xs2 xs3 R12 R23; apply I.
+  - intros [ x xs ]. split; reflexivity.
+  - intros [ x1 xs1 ] [ x2 xs2 ] [ x3 xs3 ] [ R12 Rs12 ] [ R23 Rs23 ].
+    split; etransitivity; eassumption.
+Defined.
 
 (*
 Class ConstLR (F : Type -> Type) : Type :=
@@ -227,6 +296,9 @@ Proof.
   - intro. reflexivity.
   - intros ds1 ds2 ds3; transitivity (inDownSet ds2); assumption.
 Defined.
+
+Program Definition emptyDownSet {A} `{LR A} : DownSet A :=
+  {| inDownSet a := False |}.
 
 Program Definition downClose {A} `{LR A} (a:A) : DownSet A :=
   {| inDownSet a' := lr_leq a' a |}.
@@ -374,8 +446,79 @@ Instance Proper_putL St1 St2 `{LR St1} `{LR St2} (l: Lens St1 St2) :
   Proper (lr_equiv ==> lr_equiv ==> lr_equiv) (putL l) :=
   proper_putL _ _ _.
 
-(* FIXME HERE: define some standard lenses, e.g., identity, projections, etc.,
-as well as composition of lenses *)
+(* The identity lens *)
+Program Definition id_lens A `{LR A} : Lens A A :=
+  {| getL := id;
+     putL a a' := a; |}.
+Next Obligation.
+  intros a1 a2 Ra a1' a2' Ra'. assumption.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+
+(* Build a lens for the first element of a pair *)
+Program Definition fst_lens A B `{LR A} `{LR B} : Lens (A*B) A :=
+  {| getL := fst;
+     putL a ab := (a, snd ab); |}.
+Next Obligation.
+  intros a1 a2 Ra ab1 ab2 Rab. rewrite Ra. rewrite Rab. reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+
+(* Build a lens for the second element of a pair *)
+Program Definition snd_lens A B `{LR A} `{LR B} : Lens (A*B) B :=
+  {| getL := snd;
+     putL b ab := (fst ab, b); |}.
+Next Obligation.
+  intros b1 b2 Rb ab1 ab2 Rab. rewrite Rb. rewrite Rab. reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+Next Obligation.
+  reflexivity.
+Defined.
+
+
+(* Compose two lenses *)
+Program Definition compose_lens {A B C} `{LR A} `{LR B} `{LR C}
+        (l1: Lens A B) (l2: Lens B C) : Lens A C :=
+  {| getL a := getL l2 (getL l1 a);
+     putL c a := putL l1 (putL l2 c (getL l1 a)) a;
+  |}.
+Next Obligation.
+  intros a1 a2 Ra. rewrite Ra. reflexivity.
+Defined.
+Next Obligation.
+  intros a1 a2 Ra c1 c2 Rc. rewrite Ra. rewrite Rc. reflexivity.
+Defined.
+Next Obligation.
+  rewrite lens_get_put. rewrite lens_get_put. reflexivity.
+Defined.
+Next Obligation.
+  rewrite lens_put_get. rewrite lens_put_get. reflexivity.
+Defined.
+Next Obligation.
+  rewrite lens_put_put. rewrite lens_put_get. rewrite lens_put_put. reflexivity.
+Defined.
 
 
 (***
@@ -545,6 +688,19 @@ Class MonadFix (M: forall St `{LR St} A `{LR A}, Type)
         fixM f =lr= f (fixM f)
   }.
 
+Class MonadErrorOps (M: forall St `{LR St} A `{LR A}, Type) : Type :=
+  {
+    errorM : forall {St} `{LR St} {A} `{LR A}, M St A;
+  }.
+
+Class MonadError (M: forall St `{LR St} A `{LR A}, Type)
+      `{LRFunctor2 M} `{MonadTraceOps M} `{MonadErrorOps M} : Prop :=
+  {
+    bindM_errorM :
+      forall {St} `{LR St} {A B} `{LR A} `{LR B} (f: A -> M St B),
+        bindM errorM f =lr= errorM;
+  }.
+
 
 (***
  *** The Standard State Monad as a Trace Monad
@@ -586,16 +742,16 @@ Admitted.
  *** The State Monad + Fixed-Points
  ***)
 
-(* FIXME HERE: this needs an Option A in the output type, along with the
-appropriate LR; maybe call that type Bottom A instead of Option A? *)
-Definition FixStateM St `{LR St} A `{LR A} := DownSet (StateM St A).
+Definition FixStateM St `{LR St} A `{LR A} := DownSet (StateM St (option A)).
 
 Instance LRFunctor_FixStateM : LRFunctor2 FixStateM :=
   Build_LRFunctor2 _ _.
 
+(* FIXME HERE: write these operations! *)
+(*
 Instance MonadTraceOps_FixStateM : MonadTraceOps FixStateM :=
   {|
-    returnM St lrSt A lrA a := downClose (returnM a);
+    returnM St lrSt A lrA a := downClose (returnM (not_bottom a));
     bindM St lrSt A B lrA lrB m f :=
       bindDownSet
         m (fun m' =>
@@ -623,6 +779,7 @@ Instance MonadTrace_FixStateM : MonadTrace FixStateM.
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
+*)
 
 
 (***
@@ -838,6 +995,14 @@ Instance MonadParallelOps_TraceM : MonadParallelOps TraceM :=
   |}.
 
 Instance MonadParallel_TraceM : MonadParallel TraceM.
+Proof.
+  admit. (* FIXME HERE *)
+Admitted.
+
+Instance MonadErrorOps_TraceM : MonadErrorOps TraceM :=
+  {| errorM St lrSt A lrSt := emptyDownSet |}.
+
+Instance MonadError_TraceM : MonadError TraceM.
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
