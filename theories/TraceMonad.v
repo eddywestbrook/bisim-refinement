@@ -438,13 +438,25 @@ Arguments lens_get_put {A B _ _}.
 Arguments lens_put_get {A B _ _}.
 Arguments lens_put_put {A B _ _}.
 
-Instance Proper_getL St1 St2 `{LR St1} `{LR St2} (l: Lens St1 St2) :
+Instance Proper_getL A B `{LR A} `{LR B} (l: Lens A B) :
   Proper (lr_equiv ==> lr_equiv) (getL l) :=
   proper_getL _ _ _.
 
-Instance Proper_putL St1 St2 `{LR St1} `{LR St2} (l: Lens St1 St2) :
+Instance Proper_putL A B `{LR A} `{LR B} (l: Lens A B) :
   Proper (lr_equiv ==> lr_equiv ==> lr_equiv) (putL l) :=
   proper_putL _ _ _.
+
+(* Helper: combine a getL and a putL *)
+Definition modifyL {A B} `{LR A} `{LR B} (l: Lens A B) (f: B -> B) (a:A) : A :=
+  putL l (f (getL l a)) a.
+
+Instance Proper_modifyL {A B} `{LR A} `{LR B} (l:Lens A B) f :
+  Proper (lr_equiv ==> lr_equiv) f ->
+  Proper (lr_equiv ==> lr_equiv) (modifyL l f).
+Proof.
+  intros prp_f a1 a2 eq_a. unfold modifyL.
+  rewrite eq_a. reflexivity.
+Qed.
 
 (* The identity lens *)
 Program Definition id_lens A `{LR A} : Lens A A :=
