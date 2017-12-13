@@ -133,40 +133,38 @@ Next Obligation.
 Defined.
 
 
-(* A lens is a BPerm, where get defines the read and put defines the update *)
+(* A lens is a BPerm, where get defines the read and put defines the update. Get
+goes from left (the "bigger" type) to right (the "smaller" type) *)
 Program Definition lens_bperm {St1 St2} `{LR St1} `{LR St2} (l: Lens St1 St2) :
   BPerm St1 St2 :=
   {|
     bperm_R st1 st2 := getL l st1 =lr= st2;
     bperm_upd st12 st12' :=
-      (* This says we can only update when we start in a pair of states that are
-      related by bperm_R, above; the first disjunctive clause is added to make
-      the relation reflexive *)
-      (st12 =lr= st12') \/
-      (snd st12 =lr= getL l (fst st12) /\
-       fst st12' =lr= putL l (snd st12') (fst st12));
+      (* This says we can change the smaller type any way at all, while we can
+      only change the bigger type using put *)
+      (snd st12 =lr= snd st12') /\
+      (exists st2, putL l st2 (fst st12) =lr= fst st12');
   |}.
 Next Obligation.
   intros st1 st1' eq1 st2 st2' eq2. rewrite eq1. rewrite eq2. reflexivity.
 Defined.
 Next Obligation.
   intros st1 st1' eq1 st2 st2' eq2. rewrite eq1.
-  split; intros [ eq12 | [ eq_get eq_get' ]].
-  - left; etransitivity; eassumption.
-  - right. split; [ assumption | ]. rewrite <- eq2. assumption.
-  - left; etransitivity; [ | symmetry ]; eassumption.
-  - right. rewrite eq2. split; assumption.
+  split; intros [ eq_snd [ st2'' eq_fst ]]; split.
+  - rewrite <- eq2; assumption.
+  - exists st2''. rewrite <- eq1. rewrite <- eq2. assumption.
+  - rewrite eq2; assumption.
+  - exists st2''. rewrite eq1. rewrite eq2. assumption.
 Defined.
 Next Obligation.
   constructor.
-  - intro st. left; reflexivity.
-  - intros st1 st2 st3 [ eq12 | [eq_get_12 eq_get_12'] ]
-           [ eq23 | [eq_get_23 eq_get_23'] ].
-    + left; etransitivity; eassumption.
-    + right. split; rewrite eq12; assumption.
-    + right. split; try rewrite <- eq23; assumption.
-    + right. split; etransitivity; try eassumption; try reflexivity.
-      rewrite eq_get_12'. rewrite lens_put_put. reflexivity.
+  - intros [ st1 st2 ]. split; [ reflexivity | ].
+    exists (getL l st1). apply lens_get_put.
+  - intros [ st1_1 st2_1 ] [ st1_2 st2_2 ] [ st1_3 st2_3 ]
+           [ eq12 [st2_12 ] ] [ eq23 [st2_23 ] ].
+    split; [ etransitivity; eassumption | ].
+    exists st2_23. rewrite <- H1 in H2. etransitivity; [ | apply H2 ].
+    rewrite lens_put_put. reflexivity.
 Defined.
 
 
@@ -197,3 +195,5 @@ Definition bperms_separable {St1 St2} `{LR St1} `{LR St2}
       (exists st1'' st2'',
           bperm_upd bperm2 (st1,st2) (st1'',st2'') /\
           bperm_upd bperm1 (st1'',st2'') (st1',st2'))).
+
+(* FIXME HERE: lemmas about permissions that are separable *)
