@@ -81,6 +81,14 @@ Proof.
   constructor; intro; intros; apply I.
 Defined.
 
+(* The logical relation for provable equality *)
+(* NOTE: we make this a Definition and *NOT* an Instance so that typeclass
+resolution does not use it everywhere *)
+Definition LR_eq {A} : LR A := {| lr_leq := eq |}.
+
+(* Natural numbers are considered distinct from each other *)
+Instance LR_nat : LR nat := LR_eq.
+
 Instance LR_product {A B} `{LR A} `{LR B} : LR (A*B) :=
   { lr_leq := fun p1 p2 => fst p1 <lr= fst p2 /\ snd p1 <lr= snd p2 }.
 Proof.
@@ -163,11 +171,6 @@ Proof.
 Defined.
 
 
-(* The logical relation for provable equality *)
-(* NOTE: we make this a Definition and *NOT* an Instance so that typeclass
-resolution does not use it everywhere *)
-Definition LR_eq {A} : LR A := {| lr_leq := eq |}.
-
 (* A tuple of 0 or more objects *)
 Fixpoint NTuple (A:Type) n : Type :=
   match n with
@@ -194,6 +197,25 @@ Proof.
   - intros [ x1 xs1 ] [ x2 xs2 ] [ x3 xs3 ] [ R12 Rs12 ] [ R23 Rs23 ].
     split; etransitivity; eassumption.
 Defined.
+
+(* Lists are related element-wise *)
+Inductive listR A `{LR A} : list A -> list A -> Prop :=
+| listR_nil : listR A nil nil
+| listR_cons (a1 a2:A) (l1 l2:list A) :
+    a1 <lr= a2 -> listR A l1 l2 -> listR A (a1 :: l1) (a2 :: l2)
+.
+
+Instance LR_list A `{LR A} : LR (list A) :=
+  {| lr_leq := listR A; |}.
+Proof.
+  constructor.
+  - intro l. induction l; constructor; [ reflexivity | assumption ].
+  - intros l1 l2 l3 R12; revert l3; induction R12;
+      intros l3 R23; inversion R23; constructor.
+    + etransitivity; eassumption.
+    + apply IHR12. assumption.
+Defined.
+
 
 (*
 Class ConstLR (F : Type -> Type) : Type :=
