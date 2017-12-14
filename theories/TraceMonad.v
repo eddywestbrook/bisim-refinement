@@ -365,23 +365,28 @@ Definition mapDownSet {A B} `{LR A} `{LR B} (f:A -> B) dsA : DownSet B :=
 
 (* We define the fixed-point of a set function transformer f as the intersection
 of all f-closed functions g *)
-Program Definition fixDownSet {A B} `{LR A} `{LR B}
+Program Definition fixDownSet {A B} `{LR B}
         (f: (A -> DownSet B) -> (A -> DownSet B)) (a:A) : DownSet B :=
   {| inDownSet b :=
        forall g, f g <lr= g -> inDownSet (g a) b
   |}.
 Next Obligation.
-  apply (downSetClosed _ _ _ H1). apply H2. apply H3.
+  apply (downSetClosed _ _ _ H0). apply H1. apply H2.
 Defined.
 
+(* FIXME HERE: what we really want is Proper-ness of (fixDownSet f), i.e.,
+w.r.t. the A argument, which only holds for functions f that are Proper
+w.r.t. (lr_leq ==> lr_leq ==> lr_leq) *)
+(*
 Instance Proper_fixDownSet {A B} `{LR A} `{LR B} :
   Proper (lr_leq ==> lr_leq) (fixDownSet (A:=A) (B:=B)).
 Proof.
   admit. (* FIXME HERE *)
 Admitted.
+*)
 
 (* We then prove this is a fixed-point using the Knaster-Tarski theorem *)
-Lemma fixDownSetUnfold {A B} `{LR A} `{LR B}
+Lemma fixDownSetUnfold {A B} `{LR B}
       (f: (A -> DownSet B) -> A -> DownSet B)
       (prp: Proper (lr_leq ==> lr_leq) f) :
   (fixDownSet (A:=A) (B:=B) f) =lr= f (fixDownSet f).
@@ -391,9 +396,9 @@ Proof.
     assert (f (fixDownSet f) <lr= g).
     + etransitivity; try eassumption. apply prp.
       intros a' b' in_b'. apply in_b'. assumption.
-    + apply H1; assumption.
-  - split; [ | apply H1 ].
-    simpl; intros; apply (H2 _ (prp _ _ H1)).
+    + apply H0; assumption.
+  - split; [ | apply H0 ].
+    simpl; intros; apply (H1 _ (prp _ _ H0)).
 Qed.
 
 
