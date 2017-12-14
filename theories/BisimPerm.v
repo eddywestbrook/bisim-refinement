@@ -142,28 +142,23 @@ Program Definition lens_bperm {St1 St2} `{LR St1} `{LR St2} (l: Lens St1 St2) :
     bperm_upd st12 st12' :=
       (* This says we can change the smaller type any way at all, while we can
       only change the bigger type using put *)
-      (snd st12 =lr= snd st12') /\
       (exists st2, putL l st2 (fst st12) =lr= fst st12');
   |}.
 Next Obligation.
   intros st1 st1' eq1 st2 st2' eq2. rewrite eq1. rewrite eq2. reflexivity.
 Defined.
 Next Obligation.
-  intros st1 st1' eq1 st2 st2' eq2. rewrite eq1.
-  split; intros [ eq_snd [ st2'' eq_fst ]]; split.
-  - rewrite <- eq2; assumption.
-  - exists st2''. rewrite <- eq1. rewrite <- eq2. assumption.
-  - rewrite eq2; assumption.
-  - exists st2''. rewrite eq1. rewrite eq2. assumption.
+  intros st1 st1' eq1 st2 st2' eq2.
+  split; intros [ st2'' eq_fst ]; exists st2'';
+    [ rewrite <- eq1; rewrite <- eq2 | rewrite eq1; rewrite eq2 ];
+    assumption.
 Defined.
 Next Obligation.
   constructor.
-  - intros [ st1 st2 ]. split; [ reflexivity | ].
-    exists (getL l st1). apply lens_get_put.
+  - intros [ st1 st2 ]. exists (getL l st1). apply lens_get_put.
   - intros [ st1_1 st2_1 ] [ st1_2 st2_2 ] [ st1_3 st2_3 ]
-           [ eq12 [st2_12 ] ] [ eq23 [st2_23 ] ].
-    split; [ etransitivity; eassumption | ].
-    exists st2_23. rewrite <- H1 in H2. etransitivity; [ | apply H2 ].
+           [st2_12 eq12] [st2_23 eq23].
+    exists st2_23. rewrite <- eq12 in eq23. etransitivity; [ | apply eq23 ].
     rewrite lens_put_put. reflexivity.
 Defined.
 
